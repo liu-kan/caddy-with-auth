@@ -58,8 +58,8 @@ jobs:
           provenance: false
           push: true
           tags: |
-            remnawave/caddy-with-auth:latest
-            remnawave/caddy-with-auth:${{github.ref_name}}
+            ${{ secrets.DOCKERHUB_USERNAME }}/caddy-with-auth:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/caddy-with-auth:${{github.ref_name}}
 
   send-finish-tg-msg:
     name: Send TG message
