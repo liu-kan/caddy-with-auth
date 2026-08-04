@@ -31,7 +31,8 @@ ENV GOFLAGS=-v
 
 RUN xcaddy build \
     --with github.com/greenpau/caddy-security@${CADDY_SECURITY_VERSION} \
-    --with github.com/caddy-dns/cloudflare
+    --with github.com/caddy-dns/cloudflare \
+    --with github.com/WeidiDeng/caddy-cloudflare-ip
 
 # ---- final stage ----------------------------------------------------------
 FROM caddy:${CADDY_VERSION}
