@@ -41,6 +41,6 @@ FROM caddy:${CADDY_VERSION}
 # already have published patches, fixing base-image CVEs such as
 # zlib (CVE-2026-22184) / openssl. It does not change Caddy behavior, and every
 # rebuild automatically pulls the latest patches.
-RUN apk upgrade --no-cache
+RUN apk upgrade --no-cache && apk del curl
 
 COPY --from=builder /usr/bin/caddy /usr/bin/caddy
