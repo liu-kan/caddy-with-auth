@@ -6,7 +6,11 @@ on:
       - "*"
 
   workflow_dispatch:
-
+    inputs:
+      image_tag:
+        description: "Additional Docker image tag"
+        required: false
+        default: "manual"
 jobs:
   send-tg-msg:
     name: Send TG message
@@ -59,7 +63,7 @@ jobs:
           push: true
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/caddy-with-auth:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/caddy-with-auth:${{github.ref_name}}
+            ${{ secrets.DOCKERHUB_USERNAME }}/caddy-with-auth:${{ github.ref_type == 'tag' && github.ref_name || inputs.image_tag || 'manual' }}
 
   send-finish-tg-msg:
     name: Send TG message
