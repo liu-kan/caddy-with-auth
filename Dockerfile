@@ -83,7 +83,9 @@ RUN xcaddy build \
     --with github.com/greenpau/caddy-security@${CADDY_SECURITY_VERSION} \
     --with github.com/caddy-dns/cloudflare \
     --with github.com/WeidiDeng/caddy-cloudflare-ip \
-    --with google.golang.org/grpc@v1.82.1
+    --with google.golang.org/grpc@v1.82.1 \
+    --with github.com/klauspost/compress@v1.19.1 \
+    --with golang.org/x/text@v0.40.0
 
 # ---- final stage ----------------------------------------------------------
 # Minimal DHI runtime (no shell / no package manager). Binary path matches
