@@ -1,18 +1,32 @@
 # caddy-with-auth
 
-A custom [Caddy](https://caddyserver.com/) Docker image **built from source** with [xcaddy](https://github.com/caddyserver/xcaddy), including the following plugins:
+A custom [Caddy](https://caddyserver.com/) Docker image built from source with [xcaddy](https://github.com/caddyserver/xcaddy), based on [Docker Hardened Images](https://docs.docker.com/dhi/) (`dhi.io/caddy`).
 
-- [`github.com/greenpau/caddy-security`](https://github.com/greenpau/caddy-security) — authentication, authorization, and MFA (multi-factor authentication)
-- [`github.com/caddy-dns/cloudflare`](https://github.com/caddy-dns/cloudflare) — Cloudflare DNS-01 ACME challenges for wildcard certificates
+Plugins:
 
-The image is published to Docker Hub at `${{ secrets.DOCKERHUB_USERNAME }}/caddy-with-auth`.
+- [`github.com/greenpau/caddy-security`](https://github.com/greenpau/caddy-security) — authentication, authorization, and MFA
+- [`github.com/caddy-dns/cloudflare`](https://github.com/caddy-dns/cloudflare) — Cloudflare DNS-01 ACME challenges
+- [`github.com/WeidiDeng/caddy-cloudflare-ip`](https://github.com/WeidiDeng/caddy-cloudflare-ip) — trusted Cloudflare client IP restoration
+
+Published to Docker Hub as `${{ secrets.DOCKERHUB_USERNAME }}/caddy-with-auth`.
 
 ## Features
 
+- **Docker Hardened Images**: builder `dhi.io/caddy:<ver>-debian-dev`, runtime `dhi.io/caddy:<ver>` (minimal, no shell / no package manager, non-root uid `65532`)
+- **Official Go toolchain**: latest Stable Go from [go.dev/dl](https://go.dev/dl/) (checksum-verified, `amd64` / `arm64`), not Debian `golang-*` packages
+- **Dependency CVE floor-raising** at build time via `xcaddy --with` (`grpc`, `klauspost/compress`, `golang.org/x/text`)
 - **Multi-platform**: `linux/amd64` and `linux/arm64/v8`
-- **Tracks upstream releases**: Uses the floating `caddy:2` tag by default, so every build automatically picks up the latest Caddy 2.x release and upstream security fixes; `caddy-security` uses `latest` by default
-- **Non-breaking security hardening**: Runs `apk upgrade --no-cache` in the final stage to apply published CVE patches for Alpine base-image packages, such as zlib CVE-2026-22184 and OpenSSL, without changing Caddy's behavior
-- **Reproducible builds**: All versions can be pinned with build arguments
+- **Tracks upstream releases**: floating `CADDY_VERSION=2` and `CADDY_SECURITY_VERSION=latest` by default; pin with build args when needed
+
+## Runtime notes (DHI non-root)
+
+The runtime user is **uid/gid `65532`**. Writable paths in the image are `/data`, `/config`, and `/srv`. Host or named volumes mounted there must be owned by `65532`, for example:
+
+```bash
+docker run --rm -v caddy_data:/data busybox chown -R 65532:65532 /data
+```
+
+Prefer log paths under `/data/...` (for example `/data/caddy/logs/access.log`). Creating `/logs/...` on `/` will fail with `permission denied`.
 
 ## Usage
 
@@ -20,12 +34,10 @@ The image is published to Docker Hub at `${{ secrets.DOCKERHUB_USERNAME }}/caddy
 docker pull ${{ secrets.DOCKERHUB_USERNAME }}/caddy-with-auth:latest
 ```
 
-`docker-compose.yml`:
-
 ```yaml
 services:
   caddy:
-    image: remnawave/caddy-with-auth:latest
+    image: ${{ secrets.DOCKERHUB_USERNAME }}/caddy-with-auth:latest
     restart: always
     ports:
       - "80:80"
@@ -40,24 +52,22 @@ volumes:
   caddy_config:
 ```
 
-## Building Locally
+## Building locally
+
+Requires authentication to the DHI registry:
 
 ```bash
-# Default build (tracks the latest versions)
+docker login dhi.io
 docker build -t caddy-with-auth .
-
-# Multi-platform build (requires buildx and QEMU)
 docker buildx build --platform linux/amd64,linux/arm64/v8 -t caddy-with-auth .
 ```
 
-### Build Arguments (Optional and Non-Breaking)
+### Build arguments
 
 | Argument | Default | Description |
 | --- | --- | --- |
-| `CADDY_VERSION` | `2` | Maps to the `caddy:<ver>-builder-alpine` and `caddy:<ver>` tags. Example pinned version: `2.11.4` |
-| `CADDY_SECURITY_VERSION` | `latest` | The caddy-security version. Pinned versions must include the `v` prefix, for example `v1.1.64` |
-
-Pin versions for reproducible builds:
+| `CADDY_VERSION` | `2` | Maps to `dhi.io/caddy:<ver>-debian-dev` and `dhi.io/caddy:<ver>` |
+| `CADDY_SECURITY_VERSION` | `latest` | caddy-security version; pinned values need the `v` prefix (for example `v1.1.64`) |
 
 ```bash
 docker build \
@@ -66,32 +76,26 @@ docker build \
   -t caddy-with-auth .
 ```
 
-> The build stage sets `GOFLAGS=-v`, causing `go build` to print progress for each package so that long builds do not appear to be stuck.
-
-## Configuration Examples
-
-The `examples/` directory provides several ready-to-use `Caddyfile` and `docker-compose.yml` configurations:
+## Configuration examples
 
 | Example | Description |
 | --- | --- |
 | `minimal-security-setup-with-mfa` | Minimal MFA authentication setup |
-| `minimal-security-setup-with-mfa-with-api-without-auth` | MFA authentication with unauthenticated API routes |
-| `minimal-security-setup-with-mfa-with-opened-api-sub` | MFA authentication with a public API subpath |
+| `minimal-security-setup-with-mfa-with-api-without-auth` | MFA with unauthenticated API routes |
+| `minimal-security-setup-with-mfa-with-opened-api-sub` | MFA with a public API subpath |
 | `custom-webpath-with-auth-and-protected-api-route` | Custom web path with a protected API route |
 | `custom-webpath-with-auth-with-api-without-auth` | Custom web path with unauthenticated API routes |
 | `custom-webpath-with-auth-with-opened-api-sub` | Custom web path with a public API subpath |
 
-## CI and Releases
+## CI and releases
 
-`.github/workflows/build-and-push.yml` runs when a **tag is pushed**. It uses buildx and QEMU to build a multi-platform image, pushes it to Docker Hub, and tags it with both `latest` and the Git tag:
+`.github/workflows/build-and-push.yml` runs on tag push or `workflow_dispatch`. It logs into Docker Hub and `dhi.io` (`DHI_USER` / `DHI_TOKEN`), builds multi-platform images, and pushes `latest` plus the Git tag (or the manual tag input).
 
 ```bash
-git tag v2.11.4-1
-git push origin v2.11.4-1
+git tag 20260804
+git push origin 20260804
 ```
-
-The workflow can also be started manually from the GitHub Actions page using `workflow_dispatch`.
 
 ## License
 
-See the repository's `LICENSE` file, if present.
+See the repository `LICENSE` file, if present.
