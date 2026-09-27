@@ -1,0 +1,35 @@
+services:
+  caddy:
+    # 生产环境请用 digest 固定版本，例如 youruser/caddy-with-auth@sha256:...
+    image: ${CADDY_IMAGE:-youruser/caddy-with-auth:latest}
+    container_name: caddy
+    restart: always
+    # DHI 运行镜像没有 shell，显式指定入口，避免依赖基础镜像的默认值。
+    entrypoint: ["/usr/local/bin/caddy"]
+    command: ["run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+    environment:
+      - SITE_DOMAIN=chat.example.com
+      - UPSTREAM=api:3080
+    # bridge 网络发布端口：Docker 20.10+ 允许容器内非 root（uid 65532）绑定 80/443。
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - caddy-edge
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./cloudflare-ranges.caddy:/etc/caddy/cloudflare-ranges.caddy:ro
+      - caddy-data:/data
+      - caddy-config:/config
+      # 日志落到宿主机，供宿主机上的 Fail2ban 读取；目录属主必须是 65532。
+      - /var/log/caddy:/data/logs
+
+networks:
+  # 只放 Caddy 和它需要转发到的上游服务，例如 LibreChat 的 api。
+  caddy-edge:
+    name: caddy-edge
+    external: true
+
+volumes:
+  caddy-data:
+  caddy-config:

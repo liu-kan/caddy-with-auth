@@ -1,0 +1,56 @@
+# Cloudflare 橙云之后：日志记录真实访客 IP，并把经 Cloudflare 传来的登录请求单独写一份日志供 Fail2ban 使用。
+{
+	servers {
+		# 可信代理 = 静态地址段（启动即生效，来自 cloudflare-ranges.caddy）
+		#          + caddy-cloudflare-ip 在内存里定期刷新的地址段；每个请求都用两者的并集判断。
+		# caddy-cloudflare-ip 不会改写 cloudflare-ranges.caddy，静态文件只在你重新生成并 reload 后变化。
+		trusted_proxies combine {
+			import /etc/caddy/cloudflare-ranges.caddy
+			cloudflare {
+				interval 12h
+				timeout 15s
+			}
+		}
+		# 只有 TCP 来源在可信代理内时，才从 CF-Connecting-IP 取访客 IP；否则 client_ip 就是 TCP 来源本身。
+		client_ip_headers CF-Connecting-IP
+		trusted_proxies_strict
+	}
+}
+
+{$SITE_DOMAIN} {
+	# 全部请求
+	log access {
+		output file /data/logs/access.json {
+			mode 0600
+			roll_size 20MiB
+			roll_keep 7
+			roll_keep_for 168h
+		}
+		format json
+	}
+	# 只接收下面 log_name 显式送来的请求
+	log login {
+		output file /data/logs/login.json {
+			mode 0600
+			roll_size 20MiB
+			roll_keep 7
+			roll_keep_for 168h
+		}
+		format json
+		no_hostname
+	}
+
+	# 登录相关请求，且 client_ip 与 TCP 来源不同，即确实从可信的 Cloudflare 连接里取到了访客 IP。
+	# 绕过 Cloudflare 直连的请求、或地址段没识别出来的 Cloudflare 请求，都不会进入登录日志。
+	@login_via_cf {
+		path {$LOGIN_PATH:/api/auth/*}
+		expression `{client_ip} != {remote_host}`
+	}
+	log_name @login_via_cf access login
+
+	reverse_proxy {$UPSTREAM} {
+		# 上游只看到 Caddy 验证过的访客 IP，不透传客户端自带的 X-Forwarded-For。
+		header_up X-Forwarded-For {client_ip}
+		header_up X-Real-IP {client_ip}
+	}
+}

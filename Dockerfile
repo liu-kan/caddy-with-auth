@@ -79,13 +79,33 @@ WORKDIR /build
 # which v0.29.0 renamed/broke to InterpretableV2. Forcing cel-go@v0.29.0
 # (via --replace, since it has no root-level package for --with to import)
 # fails the build. Revisit once Caddy core itself updates its cel-go usage.
+#
+# otlplog 导出器下限：依赖图里 go.opentelemetry.io/otel/log 已被拉到 v0.22.0
+# （sdk/log、stdoutlog 要求），而 caddy、caddy-security、autoexport 只要求
+# otlploggrpc/otlploghttp v0.20.0，二者 API 不兼容（undefined: api.KeyValue），
+# 原配置在 2026-09-26 已无法编译。把导出器抬到配套的 v0.22.0 即可，
+# linux/amd64 与 linux/arm64 均已验证可以编译。
+#
+# caddy-combine-ip-ranges：把内置 static（启动即生效的静态地址段）与
+# caddy-cloudflare-ip（后台定期刷新的 Cloudflare 地址段）合并给 trusted_proxies，
+# 避免 cloudflare 模块首次拉取完成前或拉取失败时，可信代理列表为空。
 RUN xcaddy build \
     --with github.com/greenpau/caddy-security@${CADDY_SECURITY_VERSION} \
     --with github.com/caddy-dns/cloudflare \
     --with github.com/WeidiDeng/caddy-cloudflare-ip \
+    --with github.com/fvbommel/caddy-combine-ip-ranges \
     --with google.golang.org/grpc@v1.82.1 \
     --with github.com/klauspost/compress@v1.19.1 \
-    --with golang.org/x/text@v0.40.0
+    --with golang.org/x/text@v0.40.0 \
+    --with go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc@v0.22.0 \
+    --with go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp@v0.22.0
+
+# 构建期断言：真实访客 IP 依赖的三个地址段模块必须都编译进去，缺一个就让构建失败。
+RUN set -eu; \
+    /build/caddy list-modules > /tmp/modules.txt; \
+    for module in http.ip_sources.static http.ip_sources.cloudflare http.ip_sources.combine; do \
+      grep -Fqx "$module" /tmp/modules.txt || { echo >&2 "error: missing Caddy module $module"; exit 1; }; \
+    done
 
 # ---- final stage ----------------------------------------------------------
 # Minimal DHI runtime (no shell / no package manager). Binary path matches
