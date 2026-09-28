@@ -93,10 +93,16 @@ RUN xcaddy build \
     --with github.com/greenpau/caddy-security@${CADDY_SECURITY_VERSION} \
     --with github.com/caddy-dns/cloudflare \
     --with github.com/WeidiDeng/caddy-cloudflare-ip \
-    --with github.com/fvbommel/caddy-combine-ip-ranges 
+    --with github.com/fvbommel/caddy-combine-ip-ranges \
+    --with google.golang.org/grpc@v1.83.2 \
+    --with github.com/klauspost/compress \
+    --with golang.org/x/text \
+    --with go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc \
+    --with go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp 
+
+
     #\
     #--with google.golang.org/grpc@v1.83.2 
-    #\
     #--with github.com/klauspost/compress@v1.19.1 \
     #--with golang.org/x/text@v0.40.0 \
     #--with go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc@v0.22.0 \
