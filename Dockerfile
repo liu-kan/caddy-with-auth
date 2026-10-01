@@ -140,6 +140,13 @@ COPY --from=builder /build/vulnerabilities.json /vulnerabilities.json
 # Development variant: keeps the shell and package manager from the dev base.
 FROM dhi.io/caddy:${CADDY_VERSION}-debian-dev AS final-dev
 
+# Refresh installed Debian packages on each CI run before copying Caddy.
+ARG DEPENDENCY_REFRESH=manual
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --no-install-recommends \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=builder /build/caddy /usr/local/bin/caddy
 
 # Minimal DHI runtime (no shell / no package manager). Kept last so builds

@@ -74,7 +74,7 @@ docker buildx build --platform linux/amd64,linux/arm64/v8 -t caddy-with-auth .
 | `CORAZA_CADDY_VERSION` | `latest` | Maintained `coraza-caddy/v2` plugin; optional stable version pin |
 | `CORAZA_VERSION` | `latest` | Coraza v3 core; the actual binary must contain a stable version >= `v3.3.3` |
 | `GRPC_VERSION` | `v1.83` | Newest patch on the v1.83.x branch; v1.84.0 is affected by GO-2026-6443; override after validating a newer branch |
-| `DEPENDENCY_REFRESH` | `manual` | Change this value to refresh cached Go toolchain, tools, dependencies and vulnerability checks; CI supplies a fresh value each run |
+| `DEPENDENCY_REFRESH` | `manual` | Change this value to refresh cached Go toolchain, tools, dependencies, vulnerability checks and dev OS package upgrades; CI supplies a fresh value each run |
 
 ```bash
 docker build \
@@ -101,7 +101,7 @@ For a fresh local dependency check, pass a new refresh value:
 docker build --pull --build-arg DEPENDENCY_REFRESH="$(date -u +%Y%m%d%H%M%S)" --target final -t caddy-with-auth:latest .
 ```
 
-Go dependency checks do not scan OS packages. The runtime variant has fewer packages than the dev variant; pulling current DHI images reduces stale base-image findings but does not guarantee zero CVEs. CVE counts can also differ between Docker Scout and the Go vulnerability database.
+Go dependency checks do not scan OS packages. Before copying the custom Caddy binary, the dev final stage refreshes Debian package indexes, upgrades installed packages noninteractively and removes package caches. It uses the same CI refresh token so each workflow run repeats the OS upgrade. The runtime variant has fewer packages than the dev variant; pulling current DHI images reduces stale base-image findings but does not guarantee zero CVEs. CVE counts can also differ between Docker Scout and the Go vulnerability database.
 
 Run the binary-check regression tests locally:
 
