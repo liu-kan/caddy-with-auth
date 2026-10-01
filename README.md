@@ -8,6 +8,7 @@ Plugins:
 - [`github.com/caddy-dns/cloudflare`](https://github.com/caddy-dns/cloudflare) — Cloudflare DNS-01 ACME challenges
 - [`github.com/WeidiDeng/caddy-cloudflare-ip`](https://github.com/WeidiDeng/caddy-cloudflare-ip) — Cloudflare IP ranges for `trusted_proxies`, refreshed in the background
 - [`github.com/fvbommel/caddy-combine-ip-ranges`](https://github.com/fvbommel/caddy-combine-ip-ranges) — combines several IP range sources (for example built-in `static` + `cloudflare`)
+- [`github.com/corazawaf/coraza-caddy/v2`](https://github.com/corazawaf/coraza-caddy) — Coraza WAF with the maintained v2 plugin and current stable Coraza v3
 
 Published to Docker Hub as `${{ secrets.DOCKERHUB_USERNAME }}/caddy-with-auth`.
 
@@ -15,7 +16,7 @@ Published to Docker Hub as `${{ secrets.DOCKERHUB_USERNAME }}/caddy-with-auth`.
 
 - **Docker Hardened Images**: builder and dev variant `dhi.io/caddy:<ver>-debian-dev`; runtime variant `dhi.io/caddy:<ver>` (minimal, no shell / no package manager, non-root uid `65532`)
 - **Official Go toolchain**: latest Stable Go from [go.dev/dl](https://go.dev/dl/) (checksum-verified, `amd64` / `arm64`), not Debian `golang-*` packages
-- **Dependency CVE floor-raising** at build time via `xcaddy --with` (`grpc`, `klauspost/compress`, `golang.org/x/text`)
+- **Dependency updates and checks**: selected dependencies follow stable releases; the resulting binary must contain the maintained Coraza plugin and Coraza >= `v3.3.3`; module-level `govulncheck` blocks findings with published fixes and reports unfixed findings before publication
 - **Multi-platform**: `linux/amd64` and `linux/arm64/v8`
 - **Tracks upstream releases**: floating `CADDY_VERSION=2` and `CADDY_SECURITY_VERSION=latest` by default; pin with build args when needed
 
@@ -70,12 +71,44 @@ docker buildx build --platform linux/amd64,linux/arm64/v8 -t caddy-with-auth .
 | --- | --- | --- |
 | `CADDY_VERSION` | `2` | Maps to `dhi.io/caddy:<ver>-debian-dev` and `dhi.io/caddy:<ver>` |
 | `CADDY_SECURITY_VERSION` | `latest` | caddy-security version; pinned values need the `v` prefix (for example `v1.1.64`) |
+| `CORAZA_CADDY_VERSION` | `latest` | Maintained `coraza-caddy/v2` plugin; optional stable version pin |
+| `CORAZA_VERSION` | `latest` | Coraza v3 core; the actual binary must contain a stable version >= `v3.3.3` |
+| `GRPC_VERSION` | `v1.83` | Newest patch on the v1.83.x branch; v1.84.0 is affected by GO-2026-6443; override after validating a newer branch |
+| `DEPENDENCY_REFRESH` | `manual` | Change this value to refresh cached Go toolchain, tools, dependencies and vulnerability checks; CI supplies a fresh value each run |
 
 ```bash
 docker build \
   --build-arg CADDY_VERSION=2.11.4 \
   --build-arg CADDY_SECURITY_VERSION=v1.1.64 \
   -t caddy-with-auth .
+```
+
+## Dependency security
+
+The old unsuffixed `github.com/corazawaf/coraza-caddy` module resolves to v1.2.2 and embeds a Coraza v3 prerelease from 2023. Use `github.com/corazawaf/coraza-caddy/v2`; the build also requests the latest stable Coraza v3 explicitly. The binary check rejects Coraza below v3.3.3, covering [CVE-2023-40586](https://github.com/corazawaf/coraza/security/advisories/GHSA-c2pj-v37r-2p6h) and [CVE-2025-29914](https://github.com/corazawaf/coraza/security/advisories/GHSA-q9f5-625g-xm39), missing modules, legacy plugin paths and unverifiable replacements.
+
+Every CI run pulls the current DHI base images and refreshes the Go toolchain, xcaddy, selected module versions and the Go vulnerability database. Both variants use the same refresh token, so the dev build can reuse the checked runtime binary. A module-level `govulncheck` finding with a published fix stops the build before publishing. Findings without a published fix remain visible in the build log and complete report; they are not treated as resolved. Scanner failures and malformed or incomplete reports also stop publication. No blanket transitive dependency upgrade is performed; incompatible APIs can still require an upstream fix or a tested version override.
+
+Version arguments are queries used while resolving the complete dependency graph. The explicit gRPC branch can also select an earlier compatible caddy-security release; the exact versions are recorded in `caddy-build-info.txt`.
+
+gRPC follows the latest stable v1.83.x patch rather than unrestricted `latest`: [GO-2026-6443](https://pkg.go.dev/vuln/GO-2026-6443) lists v1.83.2 as patched, while v1.84.0 is affected. Go minimum-version selection can still raise this version when another dependency requires it; the final binary scan checks the selected result.
+
+CI builds and checks both architectures before publishing, then retains the full per-architecture dependency inventory and JSON scan report in the `caddy-dependency-security-reports` artifact for 30 days. Before publishing, it also runs the two Coraza HTTP regression cases against a temporary amd64 runtime container on the runner. Govulncheck JSON mode normally returns success even when vulnerabilities exist; a separate report check enforces the publication policy. Module-level reports can include vulnerabilities in packages not linked into the binary, so they do not establish exploitability by themselves.
+
+For a fresh local dependency check, pass a new refresh value:
+
+```bash
+docker build --pull --build-arg DEPENDENCY_REFRESH="$(date -u +%Y%m%d%H%M%S)" --target final -t caddy-with-auth:latest .
+```
+
+Go dependency checks do not scan OS packages. The runtime variant has fewer packages than the dev variant; pulling current DHI images reduces stale base-image findings but does not guarantee zero CVEs. CVE counts can also differ between Docker Scout and the Go vulnerability database.
+
+Run the binary-check regression tests locally:
+
+```bash
+go test scripts/check-caddy-dependencies/main.go scripts/check-caddy-dependencies/main_test.go
+go test scripts/check-caddy-vulnerabilities/main.go scripts/check-caddy-vulnerabilities/main_test.go
+python3 tests/test_coraza_cves.py caddy-with-auth:latest
 ```
 
 ## Configuration examples

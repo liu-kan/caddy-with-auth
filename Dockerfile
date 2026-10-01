@@ -11,9 +11,16 @@
 # Pin with: --build-arg CADDY_VERSION=2.11.4
 ARG CADDY_VERSION=2
 # caddy-security plugin version. Default latest = fetch the newest upstream
-# release at build time (currently v1.1.64). Pin with (Go modules need the v
+# release at build time. Pin with (Go modules need the v
 # prefix): --build-arg CADDY_SECURITY_VERSION=v1.1.64
 ARG CADDY_SECURITY_VERSION=latest
+# Follow stable releases within the maintained module major versions.
+# Optional overrides allow a tested release to be pinned without editing code.
+ARG CORAZA_CADDY_VERSION=latest
+ARG CORAZA_VERSION=latest
+# Track patched v1.83.x releases: v1.84.0 is flagged by GO-2026-6443.
+# Override this query after validating a newer branch; the binary scan gates it.
+ARG GRPC_VERSION=v1.83
 
 # ---- builder stage --------------------------------------------------------
 # DHI Caddy debian-dev image: shell + apt for installing the Go toolchain.
@@ -22,6 +29,9 @@ FROM dhi.io/caddy:${CADDY_VERSION}-debian-dev AS builder
 
 # ARG scope resets after FROM, so re-declare it here.
 ARG CADDY_SECURITY_VERSION
+ARG CORAZA_CADDY_VERSION
+ARG CORAZA_VERSION
+ARG GRPC_VERSION
 # BuildKit sets this to the target arch (amd64 / arm64). Used to pick the
 # matching Go tarball from https://go.dev/dl/.
 ARG TARGETARCH
@@ -35,6 +45,12 @@ RUN apt-get update \
         git \
         gzip \
     && rm -rf /var/lib/apt/lists/*
+
+# CI supplies one refresh token per workflow run and reuses it for both
+# image variants. This invalidates floating Go/tool/module/scanner layers once
+# per run while allowing the second variant to reuse the compiled binary.
+# For local rebuilds, pass a fresh DEPENDENCY_REFRESH value when updating deps.
+ARG DEPENDENCY_REFRESH=manual
 
 # Install the newest Stable Go toolchain from go.dev for TARGETARCH.
 # Checksum is taken from the same go.dev/dl JSON metadata.
@@ -65,56 +81,60 @@ ENV PATH="/usr/local/go/bin:/root/go/bin:${PATH}"
 # override xcaddy's default -ldflags/-trimpath/-tags build flags.
 ENV GOFLAGS=-v
 
-RUN go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
+RUN go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest \
+    && go install golang.org/x/vuln/cmd/govulncheck@latest
 
 WORKDIR /build
 
-# grpc pin: caddy-security's own go.mod still floors google.golang.org/grpc
-# below the fix for GHSA-hrxh-6v49-42gf. Go's MVS takes the max requirement
-# across the build graph, so this --with raises the floor without needing
-# an upstream caddy-security release. Verified to compile as of 2026-08-04.
-#
-# cel-go is NOT bumped the same way: caddy core's own celmatcher.go (not
-# caddy-security) uses cel-go's pre-v0.29 interpreter.Interpretable API,
-# which v0.29.0 renamed/broke to InterpretableV2. Forcing cel-go@v0.29.0
-# (via --replace, since it has no root-level package for --with to import)
-# fails the build. Revisit once Caddy core itself updates its cel-go usage.
-#
-# otlplog 导出器下限：依赖图里 go.opentelemetry.io/otel/log 已被拉到 v0.22.0
-# （sdk/log、stdoutlog 要求），而 caddy、caddy-security、autoexport 只要求
-# otlploggrpc/otlploghttp v0.20.0，二者 API 不兼容（undefined: api.KeyValue），
-# 原配置在 2026-09-26 已无法编译。把导出器抬到配套的 v0.22.0 即可，
-# linux/amd64 与 linux/arm64 均已验证可以编译。
-#
+# Upgrade selected dependencies within their module major versions. Avoid a
+# blanket `go get -u`: unrelated API changes (for example cel-go) can break
+# Caddy before upstream updates its integration.
+# Coraza's maintained Caddy plugin is /v2. The unsuffixed module still resolves
+# to the obsolete v1.2.2 release and embeds a vulnerable Coraza v3 prerelease.
+# Explicitly select the latest Coraza v3 so fixes do not wait for plugin releases.
 # caddy-combine-ip-ranges：把内置 static（启动即生效的静态地址段）与
 # caddy-cloudflare-ip（后台定期刷新的 Cloudflare 地址段）合并给 trusted_proxies，
 # 避免 cloudflare 模块首次拉取完成前或拉取失败时，可信代理列表为空。
-RUN xcaddy build \
+# Resolve the minor-version query first: xcaddy requires a full version.
+RUN set -eu; \
+    grpc_version="$(go list -m -f '{{.Version}}' "google.golang.org/grpc@${GRPC_VERSION}")"; \
+    xcaddy build \
     --with github.com/greenpau/caddy-security@${CADDY_SECURITY_VERSION} \
     --with github.com/caddy-dns/cloudflare \
     --with github.com/WeidiDeng/caddy-cloudflare-ip \
     --with github.com/fvbommel/caddy-combine-ip-ranges \
-    --with google.golang.org/grpc@v1.83.2 \
+    --with "google.golang.org/grpc@${grpc_version}" \
     --with github.com/klauspost/compress \
     --with golang.org/x/text \
     --with go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc \
-    --with go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp  \
-    --with github.com/corazawaf/coraza-caddy
+    --with go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp \
+    --with github.com/corazawaf/coraza-caddy/v2@${CORAZA_CADDY_VERSION} \
+    --with github.com/corazawaf/coraza/v3@${CORAZA_VERSION}
 
+# Check the actual binary, including the minimum patched Coraza version.
+# Module-level scanning also catches vulnerable dependencies whose affected
+# functions may not be reachable; this matches dependency inventory scanners.
+# Govulncheck JSON mode does not fail on findings; the report checker below
+# enforces publication policy while retaining the complete JSON report.
+COPY scripts/check-caddy-dependencies/main.go /build/check-caddy-dependencies.go
+COPY scripts/check-caddy-vulnerabilities/main.go /build/check-caddy-vulnerabilities.go
+RUN go run /build/check-caddy-dependencies.go /build/caddy \
+    && go version -m /build/caddy > /build/caddy-build-info.txt \
+    && cat /build/caddy-build-info.txt \
+    && govulncheck -mode=binary -scan=module -json /build/caddy > /build/vulnerabilities.json \
+    && go run /build/check-caddy-vulnerabilities.go /build/vulnerabilities.json
 
-    #\
-    #--with google.golang.org/grpc@v1.83.2 
-    #--with github.com/klauspost/compress@v1.19.1 \
-    #--with golang.org/x/text@v0.40.0 \
-    #--with go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc@v0.22.0 \
-    #--with go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp@v0.22.0
-
-# 构建期断言：真实访客 IP 依赖的三个地址段模块必须都编译进去，缺一个就让构建失败。
+# 构建期断言：真实访客 IP 地址段模块和 WAF 必须都编译进去。
 RUN set -eu; \
     /build/caddy list-modules > /tmp/modules.txt; \
-    for module in http.ip_sources.static http.ip_sources.cloudflare http.ip_sources.combine; do \
+    for module in http.ip_sources.static http.ip_sources.cloudflare http.ip_sources.combine http.handlers.waf; do \
       grep -Fqx "$module" /tmp/modules.txt || { echo >&2 "error: missing Caddy module $module"; exit 1; }; \
     done
+
+# Export the complete inventory and scan report as CI artifacts.
+FROM scratch AS security-reports
+COPY --from=builder /build/caddy-build-info.txt /caddy-build-info.txt
+COPY --from=builder /build/vulnerabilities.json /vulnerabilities.json
 
 # ---- final stages ---------------------------------------------------------
 # Development variant: keeps the shell and package manager from the dev base.

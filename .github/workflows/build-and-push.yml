@@ -64,11 +64,50 @@ jobs:
           username: ${{ secrets.DHI_USER }}
           password: ${{ secrets.DHI_TOKEN }}
 
+      - name: Build and export dependency reports
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: security-reports
+          platforms: linux/amd64,linux/arm64/v8
+          pull: true
+          build-args: |
+            DEPENDENCY_REFRESH=${{ github.run_id }}-${{ github.run_attempt }}
+          provenance: false
+          outputs: type=local,dest=security-reports
+
+      - name: Upload dependency reports
+        uses: actions/upload-artifact@v7
+        with:
+          name: caddy-dependency-security-reports
+          path: security-reports/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Build runtime regression image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: final
+          platforms: linux/amd64
+          pull: true
+          build-args: |
+            DEPENDENCY_REFRESH=${{ github.run_id }}-${{ github.run_attempt }}
+          provenance: false
+          load: true
+          tags: caddy-with-auth:ci-regression
+
+      - name: Check Coraza CVE regressions
+        run: python3 tests/test_coraza_cves.py caddy-with-auth:ci-regression
+
       - name: Build and push runtime
         uses: docker/build-push-action@v6
         with:
           context: .
           target: final
+          pull: true
+          build-args: |
+            DEPENDENCY_REFRESH=${{ github.run_id }}-${{ github.run_attempt }}
           platforms: linux/amd64,linux/arm64/v8
           provenance: false
           push: true
@@ -81,6 +120,9 @@ jobs:
         with:
           context: .
           target: final-dev
+          pull: true
+          build-args: |
+            DEPENDENCY_REFRESH=${{ github.run_id }}-${{ github.run_attempt }}
           platforms: linux/amd64,linux/arm64/v8
           provenance: false
           push: true
