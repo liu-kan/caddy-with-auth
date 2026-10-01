@@ -13,13 +13,13 @@ Published to Docker Hub as `${{ secrets.DOCKERHUB_USERNAME }}/caddy-with-auth`.
 
 ## Features
 
-- **Docker Hardened Images**: builder `dhi.io/caddy:<ver>-debian-dev`, runtime `dhi.io/caddy:<ver>` (minimal, no shell / no package manager, non-root uid `65532`)
+- **Docker Hardened Images**: builder and dev variant `dhi.io/caddy:<ver>-debian-dev`; runtime variant `dhi.io/caddy:<ver>` (minimal, no shell / no package manager, non-root uid `65532`)
 - **Official Go toolchain**: latest Stable Go from [go.dev/dl](https://go.dev/dl/) (checksum-verified, `amd64` / `arm64`), not Debian `golang-*` packages
 - **Dependency CVE floor-raising** at build time via `xcaddy --with` (`grpc`, `klauspost/compress`, `golang.org/x/text`)
 - **Multi-platform**: `linux/amd64` and `linux/arm64/v8`
 - **Tracks upstream releases**: floating `CADDY_VERSION=2` and `CADDY_SECURITY_VERSION=latest` by default; pin with build args when needed
 
-## Runtime notes (DHI non-root)
+## Runtime notes (DHI non-root, tags without `-dev`)
 
 The runtime user is **uid/gid `65532`**. Writable paths in the image are `/data`, `/config`, and `/srv`. Host or named volumes mounted there must be owned by `65532`, for example:
 
@@ -59,7 +59,8 @@ Requires authentication to the DHI registry:
 
 ```bash
 docker login dhi.io
-docker build -t caddy-with-auth .
+docker build --target final -t caddy-with-auth:latest .
+docker build --target final-dev -t caddy-with-auth:latest-dev .
 docker buildx build --platform linux/amd64,linux/arm64/v8 -t caddy-with-auth .
 ```
 
@@ -115,7 +116,15 @@ docker build \
 
 ## CI and releases
 
-`.github/workflows/build-and-push.yml` runs on tag push or `workflow_dispatch`. It logs into Docker Hub and `dhi.io` (`DHI_USER` / `DHI_TOKEN`), builds multi-platform images, and pushes `latest` plus the Git tag (or the manual tag input).
+`.github/workflows/build-and-push.yml` runs on tag push or `workflow_dispatch`. It logs into Docker Hub and `dhi.io` (`DHI_USER` / `DHI_TOKEN`) and builds both multi-platform variants in the same job, allowing the dev build to reuse the builder cache from the runtime build.
+
+| Trigger | Runtime tags (`final`) | Dev tags (`final-dev`) |
+| --- | --- | --- |
+| Push Git tag `20261001` | `latest`, `20261001` | `latest-dev`, `20261001-dev` |
+| Manual, `image_tag=20261001` | `latest`, `20261001` | `latest-dev`, `20261001-dev` |
+| Manual, default or empty `image_tag` | `latest`, `manual` | `latest-dev`, `manual-dev` |
+
+For manual runs, enter the base image tag without the `-dev` suffix. The manual input takes precedence even when the workflow is run against a Git tag. Builds without `--target` default to the runtime variant.
 
 ```bash
 git tag 20260804

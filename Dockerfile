@@ -98,7 +98,8 @@ RUN xcaddy build \
     --with github.com/klauspost/compress \
     --with golang.org/x/text \
     --with go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc \
-    --with go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp 
+    --with go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp  \
+    --with github.com/corazawaf/coraza-caddy
 
 
     #\
@@ -115,9 +116,14 @@ RUN set -eu; \
       grep -Fqx "$module" /tmp/modules.txt || { echo >&2 "error: missing Caddy module $module"; exit 1; }; \
     done
 
-# ---- final stage ----------------------------------------------------------
-# Minimal DHI runtime (no shell / no package manager). Binary path matches
-# the upstream DHI image layout at /usr/local/bin/caddy.
-FROM dhi.io/caddy:${CADDY_VERSION}
+# ---- final stages ---------------------------------------------------------
+# Development variant: keeps the shell and package manager from the dev base.
+FROM dhi.io/caddy:${CADDY_VERSION}-debian-dev AS final-dev
+
+COPY --from=builder /build/caddy /usr/local/bin/caddy
+
+# Minimal DHI runtime (no shell / no package manager). Kept last so builds
+# without --target default to the runtime variant.
+FROM dhi.io/caddy:${CADDY_VERSION} AS final
 
 COPY --from=builder /build/caddy /usr/local/bin/caddy
