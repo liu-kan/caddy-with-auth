@@ -39,17 +39,12 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
         with:
           platforms: arm64,amd64
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22.x"
-
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Login to Docker Hub
         uses: docker/login-action@v4
@@ -65,7 +60,7 @@ jobs:
           password: ${{ secrets.DHI_TOKEN }}
 
       - name: Build and export dependency reports
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           target: security-reports
@@ -85,7 +80,7 @@ jobs:
           retention-days: 30
 
       - name: Build runtime regression image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           target: final
@@ -101,7 +96,7 @@ jobs:
         run: python3 tests/test_coraza_cves.py caddy-with-auth:ci-regression
 
       - name: Build and push runtime
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           target: final
@@ -116,7 +111,7 @@ jobs:
             ${{ secrets.DOCKERHUB_USERNAME }}/caddy-with-auth:${{ env.IMAGE_TAG }}
 
       - name: Build and push dev
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           target: final-dev
