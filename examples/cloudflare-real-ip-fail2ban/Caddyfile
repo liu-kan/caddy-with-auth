@@ -1,5 +1,26 @@
 # Cloudflare 橙云之后：日志记录真实访客 IP，并把经 Cloudflare 传来的登录请求单独写一份日志供 Fail2ban 使用。
 {
+	# Caddy 运行错误：反向代理连接失败、证书错误等；HTTP 响应状态仍看访问日志。
+	log errors {
+		output file /data/logs/error.json {
+			mode 0600
+			roll_size 20MiB
+			roll_keep 7
+			roll_keep_for 168h
+		}
+		level ERROR
+		exclude http.log.access
+		format filter {
+			wrap json
+			fields {
+				request>uri query {
+					replace token REDACTED
+				}
+				request>headers delete
+			}
+		}
+	}
+
 	servers {
 		# 可信代理 = 静态地址段（启动即生效，来自 cloudflare-ranges.caddy）
 		#          + caddy-cloudflare-ip 在内存里定期刷新的地址段；每个请求都用两者的并集判断。
@@ -26,7 +47,15 @@
 			roll_keep 7
 			roll_keep_for 168h
 		}
-		format json
+		format filter {
+			wrap json
+			fields {
+				request>uri query {
+					replace token REDACTED
+				}
+				request>headers>Referer delete
+			}
+		}
 	}
 	# 只接收下面 log_name 显式送来的请求
 	log login {
@@ -36,17 +65,33 @@
 			roll_keep 7
 			roll_keep_for 168h
 		}
-		format json
+		format filter {
+			wrap json
+			fields {
+				request>uri query {
+					replace token REDACTED
+				}
+				request>headers>Referer delete
+			}
+		}
 		no_hostname
 	}
 
-	# 登录相关请求，且 client_ip 与 TCP 来源不同，即确实从可信的 Cloudflare 连接里取到了访客 IP。
+	# client_ip 可为 IPv4 或 IPv6，与 TCP 来源不同才记录到认证日志。
 	# 绕过 Cloudflare 直连的请求、或地址段没识别出来的 Cloudflare 请求，都不会进入登录日志。
-	@login_via_cf {
-		path {$LOGIN_PATH:/api/auth/*}
+	@auth_post_via_cf {
+		method POST
+		path {$LOGIN_PATH:/api/auth/login} /api/auth/requestPasswordReset /api/auth/resetPassword
 		expression `{client_ip} != {remote_host}`
 	}
-	log_name @login_via_cf access login
+	log_name @auth_post_via_cf access login
+
+	@reset_page_via_cf {
+		method GET
+		path /reset-password
+		expression `{client_ip} != {remote_host}`
+	}
+	log_name @reset_page_via_cf access login
 
 	reverse_proxy {$UPSTREAM} {
 		# 上游只看到 Caddy 验证过的访客 IP，不透传客户端自带的 X-Forwarded-For。

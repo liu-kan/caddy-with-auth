@@ -54,6 +54,22 @@ volumes:
   caddy_config:
 ```
 
+### Validate and reload a Compose service
+
+Run these commands in the deployment directory containing `compose.yaml` (or `docker-compose.yml`). The service name is `caddy`; no `container_name: caddy` is required. Use the same Compose `-f` / `-p` options as when starting the service, if applicable.
+
+```bash
+docker compose run --rm --no-deps \
+  --entrypoint /usr/local/bin/caddy caddy validate \
+  --config /etc/caddy/Caddyfile --adapter caddyfile &&
+docker compose exec -T caddy /usr/local/bin/caddy reload \
+  --config /etc/caddy/Caddyfile --adapter caddyfile
+```
+
+The explicit entrypoint works with both runtime and `-dev` images. Validation uses a temporary container with the service's mounts and environment; `--no-deps` avoids starting dependencies such as `api`, and `--rm` removes the temporary container. Reload runs in the existing service container, so Caddy must already be running. `&&` skips reload if validation fails, and `-T` allows use from scripts without a terminal. See the Docker references for [`run`](https://docs.docker.com/reference/cli/docker/compose/run/) and [`exec`](https://docs.docker.com/reference/cli/docker/compose/exec/).
+
+For individual file bind mounts, reload requires the running container to see the updated file. An editor or generator that replaces the file with `mv` can leave the container reading the old file. See [Cloudflare range updates](examples/cloudflare-real-ip-fail2ban/README.md#更新静态地址段) for a workflow that preserves the mounted file, and [updating a running Caddy](examples/cloudflare-real-ip-fail2ban/README.md#更新运行中的-caddy) for container recreation when needed.
+
 ## Building locally
 
 Requires authentication to the DHI registry:
@@ -121,7 +137,7 @@ python3 tests/test_coraza_cves.py caddy-with-auth:latest
 | `custom-webpath-with-auth-and-protected-api-route` | Custom web path with a protected API route |
 | `custom-webpath-with-auth-with-api-without-auth` | Custom web path with unauthenticated API routes |
 | `custom-webpath-with-auth-with-opened-api-sub` | Custom web path with a public API subpath |
-| `cloudflare-real-ip-fail2ban` | Behind Cloudflare: log the real visitor IP and write a separate login log for Fail2ban |
+| `cloudflare-real-ip-fail2ban` | Behind Cloudflare: IPv4/IPv6 visitor IPs, authentication/error logs and a dual-stack Fail2ban filter |
 
 ## Cloudflare 真实访客 IP
 
@@ -145,7 +161,17 @@ python3 tests/test_coraza_cves.py caddy-with-auth:latest
 }
 ```
 
-完整示例（含静态地址段生成脚本、只记录经 Cloudflare 传来的登录请求的单独日志、Fail2ban filter）见 [`examples/cloudflare-real-ip-fail2ban`](examples/cloudflare-real-ip-fail2ban/)。镜像构建时会校验 `http.ip_sources.static`、`http.ip_sources.cloudflare`、`http.ip_sources.combine` 三个模块都已编译进去。
+完整示例（含双栈静态地址段生成脚本、登录/重置密码及运行错误日志、IPv4/IPv6 Fail2ban filter 和验证命令）见 [`examples/cloudflare-real-ip-fail2ban`](examples/cloudflare-real-ip-fail2ban/)。IPv6 访客可以通过 Cloudflare 的 IPv4 连接回源，无须仅为日志识别给源站开启 IPv6。镜像构建时会校验 `http.ip_sources.static`、`http.ip_sources.cloudflare`、`http.ip_sources.combine` 三个模块都已编译进去。
+
+该示例的 Fail2ban filter 只统计 `POST /api/auth/login` 的 **401/404/429**：LibreChat 密码错误或用户不存在会返回 404，不能只匹配 401。refresh/logout、成功登录及其它路径的 404 均不计入，排查与 jail 重载步骤见[多次密码错误却没有匹配](examples/cloudflare-real-ip-fail2ban/README.md#多次密码错误却没有匹配)。
+
+在实际部署目录中，`./gen-cloudflare-ranges.sh && docker exec caddy ... reload` 对应的 Docker Compose 命令为：
+
+```bash
+./gen-cloudflare-ranges.sh && docker compose exec -T caddy /usr/local/bin/caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+```
+
+此简写要求生成后容器能读取新文件，例如挂载配置文件所在目录。若使用 `./cloudflare-ranges.caddy:/etc/caddy/cloudflare-ranges.caddy:ro` 单文件挂载，请使用示例 README 中的[完整更新步骤](examples/cloudflare-real-ip-fail2ban/README.md#更新静态地址段)，避免脚本的 `mv` 替换使容器仍读取旧文件。
 
 ## CI and releases
 
