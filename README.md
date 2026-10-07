@@ -9,6 +9,7 @@ Plugins:
 - [`github.com/WeidiDeng/caddy-cloudflare-ip`](https://github.com/WeidiDeng/caddy-cloudflare-ip) — Cloudflare IP ranges for `trusted_proxies`, refreshed in the background
 - [`github.com/fvbommel/caddy-combine-ip-ranges`](https://github.com/fvbommel/caddy-combine-ip-ranges) — combines several IP range sources (for example built-in `static` + `cloudflare`)
 - [`github.com/corazawaf/coraza-caddy/v2`](https://github.com/corazawaf/coraza-caddy) — Coraza WAF with the maintained v2 plugin and current stable Coraza v3
+- [`plugins/coraza-ipset`](plugins/coraza-ipset) (this repository) — Coraza's `@ipMatchFromFile` finds an address by binary search instead of comparing every network of the list; see [IP lists in Coraza](#ip-lists-in-coraza-coraza-ipset)
 
 Published to Docker Hub as `${{ secrets.DOCKERHUB_USERNAME }}/caddy-with-auth`.
 
@@ -16,7 +17,7 @@ Published to Docker Hub as `${{ secrets.DOCKERHUB_USERNAME }}/caddy-with-auth`.
 
 - **Docker Hardened Images**: builder and dev variant `dhi.io/caddy:<ver>-debian-dev`; runtime variant `dhi.io/caddy:<ver>` (minimal, no shell / no package manager, non-root uid `65532`)
 - **Official Go toolchain**: latest Stable Go from [go.dev/dl](https://go.dev/dl/) (checksum-verified, `amd64` / `arm64`), not Debian `golang-*` packages
-- **Dependency updates and checks**: selected dependencies follow stable releases; the resulting binary must contain the maintained Coraza plugin and Coraza >= `v3.3.3`; module-level `govulncheck` blocks findings with published fixes and reports unfixed findings before publication
+- **Dependency updates and checks**: selected dependencies follow stable releases; the resulting binary must contain the maintained Coraza plugin, Coraza >= `v3.3.3` and the coraza-ipset plugin; module-level `govulncheck` blocks findings with published fixes and reports unfixed findings before publication
 - **Multi-platform**: `linux/amd64` and `linux/arm64/v8`
 - **Tracks upstream releases**: floating `CADDY_VERSION=2` and `CADDY_SECURITY_VERSION=latest` by default; pin with build args when needed
 
@@ -109,7 +110,7 @@ Version arguments are queries used while resolving the complete dependency graph
 
 gRPC follows the latest stable v1.83.x patch rather than unrestricted `latest`: [GO-2026-6443](https://pkg.go.dev/vuln/GO-2026-6443) lists v1.83.2 as patched, while v1.84.0 is affected. Go minimum-version selection can still raise this version when another dependency requires it; the final binary scan checks the selected result.
 
-CI builds and checks both architectures before publishing, then retains the full per-architecture dependency inventory and JSON scan report in the `caddy-dependency-security-reports` artifact for 30 days. Before publishing, it also runs the two Coraza HTTP regression cases against a temporary amd64 runtime container on the runner. Govulncheck JSON mode normally returns success even when vulnerabilities exist; a separate report check enforces the publication policy. Module-level reports can include vulnerabilities in packages not linked into the binary, so they do not establish exploitability by themselves.
+CI builds and checks both architectures before publishing, then retains the full per-architecture dependency inventory and JSON scan report in the `caddy-dependency-security-reports` artifact for 30 days. Before publishing, it also runs the two Coraza HTTP regression cases and the coraza-ipset checks against a temporary amd64 runtime container on the runner. Govulncheck JSON mode normally returns success even when vulnerabilities exist; a separate report check enforces the publication policy. Module-level reports can include vulnerabilities in packages not linked into the binary, so they do not establish exploitability by themselves.
 
 For a fresh local dependency check, pass a new refresh value:
 
@@ -124,8 +125,26 @@ Run the binary-check regression tests locally:
 ```bash
 go test scripts/check-caddy-dependencies/main.go scripts/check-caddy-dependencies/main_test.go
 go test scripts/check-caddy-vulnerabilities/main.go scripts/check-caddy-vulnerabilities/main_test.go
+(cd plugins/coraza-ipset && go test ./...)
 python3 tests/test_coraza_cves.py caddy-with-auth:latest
+python3 tests/test_coraza_ipset.py caddy-with-auth:latest
 ```
+
+## IP lists in Coraza (coraza-ipset)
+
+Coraza v3 matches `@ipMatchFromFile` by comparing the client address with every network of the list, so the cost grows with the list: about 2 ms per request for 280,000 networks. `plugins/coraza-ipset` registers a replacement for `@ipMatchFromFile` and its `@ipMatchF` alias. The replacement keeps the networks as sorted ranges and finds an address by binary search (under 0.1 µs, independent of the list size). Rules, lists and results are unchanged:
+
+- Parsing and matching reproduce Coraza's: the same tokenization and `net.ParseCIDR`, unparsable entries are skipped, an empty list matches nothing, and IPv4-mapped addresses match IPv4 networks. Tests compare it with Coraza's algorithm on edge cases, random lists and fuzzed input.
+- A parsed list is cached by its content and shared by every WAF that loads it; Coraza releases it when the last of those WAFs closes.
+- The build runs the plugin tests against the Coraza release it links. They fail when Coraza changes the operator code the plugin reproduces, so a Coraza update cannot silently diverge from it: review the change, update the plugin, then record the new hashes in `ipset_test.go`.
+
+Confirm that an image contains it:
+
+```bash
+docker run --rm --entrypoint /usr/local/bin/caddy caddy-with-auth:latest build-info | grep coraza-ipset
+```
+
+An image without the plugin runs the same configuration with Coraza's own linear matching; nothing else changes.
 
 ## Configuration examples
 

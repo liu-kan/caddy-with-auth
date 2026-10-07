@@ -95,6 +95,9 @@ jobs:
       - name: Check Coraza CVE regressions
         run: python3 tests/test_coraza_cves.py caddy-with-auth:ci-regression
 
+      - name: Check the coraza-ipset plugin
+        run: python3 tests/test_coraza_ipset.py caddy-with-auth:ci-regression
+
       - name: Build and push runtime
         uses: docker/build-push-action@v7
         with:

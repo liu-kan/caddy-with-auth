@@ -86,6 +86,16 @@ RUN go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest \
 
 WORKDIR /build
 
+# plugins/coraza-ipset makes Coraza's @ipMatchFromFile (and @ipMatchF) find
+# an address by binary search over sorted ranges instead of comparing every
+# network of the list. Test it against the Coraza release this build links:
+# the tests compare it with Coraza's own matching and fail when Coraza
+# changes the code it reproduces.
+COPY plugins/ /build/plugins/
+RUN set -eu; \
+    go -C /build/plugins/coraza-ipset get "github.com/corazawaf/coraza/v3@${CORAZA_VERSION}"; \
+    go -C /build/plugins/coraza-ipset test ./...
+
 # Upgrade selected dependencies within their module major versions. Avoid a
 # blanket `go get -u`: unrelated API changes (for example cel-go) can break
 # Caddy before upstream updates its integration.
@@ -109,7 +119,8 @@ RUN set -eu; \
     --with go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc \
     --with go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp \
     --with github.com/corazawaf/coraza-caddy/v2@${CORAZA_CADDY_VERSION} \
-    --with github.com/corazawaf/coraza/v3@${CORAZA_VERSION}
+    --with github.com/corazawaf/coraza/v3@${CORAZA_VERSION} \
+    --with github.com/liu-kan/caddy-with-auth/plugins/coraza-ipset=/build/plugins/coraza-ipset
 
 # Check the actual binary, including the minimum patched Coraza version.
 # Module-level scanning also catches vulnerable dependencies whose affected
@@ -124,12 +135,14 @@ RUN go run /build/check-caddy-dependencies.go /build/caddy \
     && govulncheck -mode=binary -scan=module -json /build/caddy > /build/vulnerabilities.json \
     && go run /build/check-caddy-vulnerabilities.go /build/vulnerabilities.json
 
-# 构建期断言：真实访客 IP 地址段模块和 WAF 必须都编译进去。
+# 构建期断言：真实访客 IP 地址段模块、WAF 和 coraza-ipset 插件必须都编译进去。
 RUN set -eu; \
     /build/caddy list-modules > /tmp/modules.txt; \
     for module in http.ip_sources.static http.ip_sources.cloudflare http.ip_sources.combine http.handlers.waf; do \
       grep -Fqx "$module" /tmp/modules.txt || { echo >&2 "error: missing Caddy module $module"; exit 1; }; \
-    done
+    done; \
+    grep -Fq "github.com/liu-kan/caddy-with-auth/plugins/coraza-ipset" /build/caddy-build-info.txt \
+      || { echo >&2 "error: missing the coraza-ipset plugin"; exit 1; }
 
 # Export the complete inventory and scan report as CI artifacts.
 FROM scratch AS security-reports
