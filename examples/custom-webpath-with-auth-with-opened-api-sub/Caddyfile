@@ -46,15 +46,9 @@
 }
 
 https://{$REMNAWAVE_PANEL_DOMAIN} {
-	@login_path {
-		path /{$REMNAWAVE_CUSTOM_LOGIN_ROUTE} /{$REMNAWAVE_CUSTOM_LOGIN_ROUTE}/ /{$REMNAWAVE_CUSTOM_LOGIN_ROUTE}/auth
-	}
-
-	handle @login_path {
-		rewrite * /auth
-		request_header +X-Forwarded-Prefix /{$REMNAWAVE_CUSTOM_LOGIN_ROUTE}
-		authenticate with remnawaveportal
-	}
+	# 登录入口必须带尾斜杠：门户按请求路径推断挂载点，直接访问登录路径会让它发出
+	# 根路径的 /auth/login，落进下面的 route /* 被 authorize 拦截，登录页打不开。
+	redir /{$REMNAWAVE_CUSTOM_LOGIN_ROUTE} /{$REMNAWAVE_CUSTOM_LOGIN_ROUTE}/?{query} 308
 
 	handle_path /restricted* {
 		abort

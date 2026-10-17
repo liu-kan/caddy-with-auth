@@ -50,11 +50,9 @@ https://{$REMNAWAVE_PANEL_DOMAIN} {
 		reverse_proxy http://remnawave:3000
 	}
 
-	handle /r {
-		rewrite * /auth
-		request_header +X-Forwarded-Prefix /r
-		authenticate with remnawaveportal
-	}
+	# 登录入口必须带尾斜杠：门户按请求路径推断挂载点，直接访问 /r 会让它发出
+	# 根路径的 /auth/login，落进下面的 route /* 被 authorize 拦截成死循环。
+	redir /r /r/?{query} 308
 
 	route /r* {
 		authenticate with remnawaveportal
