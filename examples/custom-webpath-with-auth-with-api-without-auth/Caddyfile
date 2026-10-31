@@ -54,12 +54,7 @@ https://{$REMNAWAVE_PANEL_DOMAIN} {
 		abort
 	}
 
-	route /api/sub* {
-		reverse_proxy http://remnawave:3000
-	}
-
 	route /api/* {
-		authorize with panelpolicy
 		reverse_proxy http://remnawave:3000
 	}
 
