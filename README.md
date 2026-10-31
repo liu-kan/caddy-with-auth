@@ -109,6 +109,8 @@ Version arguments are queries used while resolving the complete dependency graph
 
 gRPC follows the latest stable v1.83.x patch rather than unrestricted `latest`: [GO-2026-6443](https://pkg.go.dev/vuln/GO-2026-6443) lists v1.83.2 as patched, while v1.84.0 is affected. Go minimum-version selection can still raise this version when another dependency requires it; the final binary scan checks the selected result.
 
+`go-chi/chi/v5` and `go-jose/go-jose/v4` are also selected at their latest releases in the xcaddy build (they are transitive dependencies that upstream lags on). `go-jose/go-jose/v3` (pulled in by Caddy's dependencies and caddy-security) and `golang.org/x/crypto` (GO-2026-5932) currently have no published fix and cannot be upgraded; they will be picked up automatically once fixed releases appear.
+
 CI builds and checks both architectures before publishing, then retains the full per-architecture dependency inventory and JSON scan report in the `caddy-dependency-security-reports` artifact for 30 days. Before publishing, it also runs the two Coraza HTTP regression cases and the coraza-ipset checks against a temporary amd64 runtime container on the runner. Govulncheck JSON mode normally returns success even when vulnerabilities exist; a separate report check enforces the publication policy. Module-level reports can include vulnerabilities in packages not linked into the binary, so they do not establish exploitability by themselves.
 
 For a fresh local dependency check, pass a new refresh value:

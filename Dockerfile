@@ -102,7 +102,12 @@ RUN set -eu; \
 # 避免 cloudflare 模块首次拉取完成前或拉取失败时，可信代理列表为空。
 # grpc, x/net, x/text etc. are unpinned on purpose: xcaddy resolves the latest
 # release, and the binary scan below gates any vulnerable result.
+# chi and go-jose/v4 are transitive dependencies of Caddy / caddy-security that
+# upstream releases lag behind; selecting the latest release picks up fixes such
+# as CVE-2026-114437 (chi < 5.4.0) without waiting for them.
 RUN xcaddy build \
+    --with github.com/go-chi/chi/v5 \
+    --with github.com/go-jose/go-jose/v4 \
     --with github.com/greenpau/caddy-security@${CADDY_SECURITY_VERSION} \
     --with github.com/caddy-dns/cloudflare \
     --with github.com/WeidiDeng/caddy-cloudflare-ip \
