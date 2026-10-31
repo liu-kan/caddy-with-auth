@@ -90,7 +90,6 @@ docker buildx build --platform linux/amd64,linux/arm64/v8 -t caddy-with-auth .
 | `CADDY_SECURITY_VERSION` | `latest` | caddy-security version; pinned values need the `v` prefix (for example `v1.1.64`) |
 | `CORAZA_CADDY_VERSION` | `latest` | Maintained `coraza-caddy/v2` plugin; optional stable version pin |
 | `CORAZA_VERSION` | `latest` | Coraza v3 core; the actual binary must contain a stable version >= `v3.3.3` |
-| `GRPC_VERSION` | `v1.83` | Newest patch on the v1.83.x branch; v1.84.0 is affected by GO-2026-6443; override after validating a newer branch |
 | `DEPENDENCY_REFRESH` | `manual` | Change this value to refresh cached Go toolchain, tools, dependencies, vulnerability checks and dev OS package upgrades; CI supplies a fresh value each run |
 
 ```bash

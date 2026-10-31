@@ -18,9 +18,6 @@ ARG CADDY_SECURITY_VERSION=latest
 # Optional overrides allow a tested release to be pinned without editing code.
 ARG CORAZA_CADDY_VERSION=latest
 ARG CORAZA_VERSION=latest
-# Track patched v1.83.x releases: v1.84.0 is flagged by GO-2026-6443.
-# Override this query after validating a newer branch; the binary scan gates it.
-ARG GRPC_VERSION=v1.83
 
 # ---- builder stage --------------------------------------------------------
 # DHI Caddy debian-dev image: shell + apt for installing the Go toolchain.
@@ -31,7 +28,6 @@ FROM dhi.io/caddy:${CADDY_VERSION}-debian-dev AS builder
 ARG CADDY_SECURITY_VERSION
 ARG CORAZA_CADDY_VERSION
 ARG CORAZA_VERSION
-ARG GRPC_VERSION
 # BuildKit sets this to the target arch (amd64 / arm64). Used to pick the
 # matching Go tarball from https://go.dev/dl/.
 ARG TARGETARCH
@@ -42,7 +38,6 @@ RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
-        git \
         gzip \
     && rm -rf /var/lib/apt/lists/*
 
@@ -105,17 +100,17 @@ RUN set -eu; \
 # caddy-combine-ip-ranges：把内置 static（启动即生效的静态地址段）与
 # caddy-cloudflare-ip（后台定期刷新的 Cloudflare 地址段）合并给 trusted_proxies，
 # 避免 cloudflare 模块首次拉取完成前或拉取失败时，可信代理列表为空。
-# Resolve the minor-version query first: xcaddy requires a full version.
-RUN set -eu; \
-    grpc_version="$(go list -m -f '{{.Version}}' "google.golang.org/grpc@${GRPC_VERSION}")"; \
-    xcaddy build \
+# grpc, x/net, x/text etc. are unpinned on purpose: xcaddy resolves the latest
+# release, and the binary scan below gates any vulnerable result.
+RUN xcaddy build \
     --with github.com/greenpau/caddy-security@${CADDY_SECURITY_VERSION} \
     --with github.com/caddy-dns/cloudflare \
     --with github.com/WeidiDeng/caddy-cloudflare-ip \
     --with github.com/fvbommel/caddy-combine-ip-ranges \
-    --with "google.golang.org/grpc@${grpc_version}" \
+    --with google.golang.org/grpc \
     --with github.com/klauspost/compress \
     --with golang.org/x/text \
+    --with golang.org/x/net/html \
     --with go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc \
     --with go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp \
     --with github.com/corazawaf/coraza-caddy/v2@${CORAZA_CADDY_VERSION} \
